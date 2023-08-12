@@ -1,4 +1,5 @@
-import { textReaderToLineIterator } from "./helper";
+import { textReaderToLineIterator, InvalidEventSourceResponseError, ReconnectingEventSourceError, AbortedEventSourceError } from "./helper";
+export { InvalidEventSourceResponseError, ReconnectingEventSourceError, AbortedEventSourceError };
 
 const defaultRetryTime = 1000;
 
@@ -8,11 +9,19 @@ interface EventStreamParseBuffers {
     lastEventId: string;
 }
 
+type EventSourceInit = RequestInit & { disconnectOnHidden?: boolean };
+
 interface EventSourceEventMap {
     open: Event;
     message: MessageEvent;
-    error: Event;
+    error: ErrorEvent;
     close: Event;
+}
+
+enum EventSourceReadyState {
+    CONNECTING = 0,
+    OPEN = 1,
+    CLOSED = 2,
 }
 
 export default class EventSource extends EventTarget {
@@ -21,6 +30,7 @@ export default class EventSource extends EventTarget {
     #abortController: AbortController;
     #lastEventId?: string = "";
     #reconnectTime: number = defaultRetryTime;
+    #disconnectOnHidden: boolean = false;
 
     #onopen: ((e: Event) => void) | null = null;
     #onmessage: ((e: MessageEvent) => void) | null = null;
@@ -32,6 +42,17 @@ export default class EventSource extends EventTarget {
     static readonly CLOSED = 2;
 
     readyState: 0 | 1 | 2;
+    get disconnectOnHidden(): boolean {
+        return this.#disconnectOnHidden;
+    }
+    set disconnectOnHidden(value: boolean) {
+        if (this.#disconnectOnHidden == value)
+            return;
+        this.#disconnectOnHidden = value;
+        value ? 
+            document.addEventListener("visibilitychange", this.#handleVisibilityChange) : 
+            document.removeEventListener("visibilitychange", this.#handleVisibilityChange);
+    }
     get url(): URL {
         if (this.#reqInfo instanceof URL)
             return this.#reqInfo;
@@ -41,21 +62,24 @@ export default class EventSource extends EventTarget {
             return new URL(this.#reqInfo);
     }
 
-    constructor(input: RequestInfo | URL, init?: RequestInit) {
+    constructor(input: RequestInfo | URL, init?: EventSourceInit) {
         super();
         this.#reqInfo = input;
         this.#options = init;
-        this.readyState = EventSource.CONNECTING;
+        this.readyState = EventSourceReadyState.CONNECTING;
         this.#abortController = new AbortController();
+        this.#disconnectOnHidden = init?.disconnectOnHidden ?? false;
+        if (this.#disconnectOnHidden)
+            document.addEventListener("visibilitychange", this.#handleVisibilityChange);
 
         this.#connect();
     }
 
     #connect(): void {
+        console.log("connecting");
         // calling fetch in a synchronous function will allow the errors thrown 
         // synchronously by fetch to escape without being reported as 
         // unhandled promise errors
-        console.log("Connecting...");
         let headers = new Headers(this.#options?.headers);
         headers.set("Accept", "text/event-stream");
         if (this.#lastEventId)
@@ -73,10 +97,14 @@ export default class EventSource extends EventTarget {
     async #startFetch(fetchPromise: Promise<Response>): Promise<void> {
         try {
             let response = await fetchPromise;
-            if (response.status !== 200 || 
-                !response.headers.get("content-type")?.startsWith("text/event-stream")) {
-                    this.#fail();
-                    return;
+            let contentType = response.headers.get("content-type");
+            if (response.status !== 200 || !contentType?.startsWith("text/event-stream")) {
+                let message = response.status === 200 
+                    ? `Invalid response content-type '${contentType}'. Must be text/event-stream` 
+                    : `Response status is not 200 OK (status: ${response.status} ${response.statusText})`;
+                let error = new InvalidEventSourceResponseError(message, response);
+                this.#fail(error);
+                return;
             }
             this.#announce();
             let reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
@@ -90,14 +118,15 @@ export default class EventSource extends EventTarget {
                 this.#handleEvent(line, buffers);
             }
         } catch (e) {
+            console.log(e);
             // the fetch can throw an error in the following cases:
             // - the request is aborted
             if (e instanceof DOMException && e.name === "AbortError") {
-                this.#fail();
+                let error = new AbortedEventSourceError();
+                this.#fail(error);
             }
             // - the request is a network error
             else if (e instanceof TypeError) {
-                console.error("Network error. Recconecting");
                 this.#reconnect();
             }
             // unknown error - rethrow
@@ -134,9 +163,9 @@ export default class EventSource extends EventTarget {
 
     #announce(): void {
         setTimeout(() => {
-            if (this.readyState === EventSource.CLOSED)
+            if (this.readyState === EventSourceReadyState.CLOSED)
                 return;
-            this.readyState = EventSource.OPEN;
+            this.readyState = EventSourceReadyState.OPEN;
             this.dispatchEvent(new Event("open"));
         }, 0);
     }
@@ -158,7 +187,7 @@ export default class EventSource extends EventTarget {
 
         // enqueue a task to dispatch the event
         setTimeout(() => {
-            if (this.readyState !== EventSource.CLOSED)
+            if (this.readyState !== EventSourceReadyState.CLOSED)
                 this.dispatchEvent(event);
         }, 0);
 
@@ -166,47 +195,63 @@ export default class EventSource extends EventTarget {
         buffers.eventType = "";
     }
 
-    #fail(): void {
+    #fail(err: Error): void {
         setTimeout(() => {
-            if (this.readyState === EventSource.CLOSED)
+            if (this.readyState === EventSourceReadyState.CLOSED)
                 return;
-            this.readyState = EventSource.CONNECTING;
-            this.dispatchEvent(new Event("error"));
+            this.readyState = EventSourceReadyState.CONNECTING;
+            this.dispatchEvent(new ErrorEvent("error", {
+                error: err,
+                message: err.message,
+            }));
         }, 0);
     }
 
     async #reconnect(): Promise<void> {
         // enqueue a task to dispatch the error event
         let errorTask = Promise.resolve().then(() => {
-            if (this.readyState === EventSource.CLOSED)
+            if (this.readyState === EventSourceReadyState.CLOSED)
                 return;
-            this.readyState = EventSource.CONNECTING;
-            this.dispatchEvent(new Event("error"));
+            this.readyState = EventSourceReadyState.CONNECTING;
+            this.dispatchEvent(new ErrorEvent("error", {
+                error: new ReconnectingEventSourceError(),
+            }));
         });
         // wait for the reconnect time and the error event to be dispatched
         await new Promise(resolve => setTimeout(resolve, this.#reconnectTime));
         await errorTask;
         Promise.resolve().then(() => {
-            if (this.readyState !== EventSource.CONNECTING)
+            if (this.readyState !== EventSourceReadyState.CONNECTING)
                 return;
             this.#connect();
         });
     }
 
+    // this is a bound function so that it can be used as an event listener
+    #handleVisibilityChange = () => {
+        console.log("visibility change: ", document.hidden, this.readyState);
+        if (document.hidden) {
+            this.#abortController.abort();
+            this.#abortController = new AbortController();
+        } else if (!document.hidden) {
+            this.#reconnect();
+        }
+    }
+
     close(): void {
-        this.readyState = EventSource.CLOSED;
+        this.readyState = EventSourceReadyState.CLOSED;
         this.#abortController.abort();
     }
 
     // all the ugly overloads to make the typescript compiler happy
     addEventListener<K extends keyof EventSourceEventMap>(type: K, listener: (e: EventSourceEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-    addEventListener(type: string, listener: (e: MessageEvent | Event) => void, options?: boolean | AddEventListenerOptions): void;
-    addEventListener(type: string, listener: (e: MessageEvent | Event) => void, options?: boolean | AddEventListenerOptions): void {
+    addEventListener(type: string, listener: (e: MessageEvent) => void, options?: boolean | AddEventListenerOptions): void;
+    addEventListener(type: string, listener: ((e: MessageEvent) => void) | ((e: ErrorEvent) => void) | ((e: Event) => void), options?: boolean | AddEventListenerOptions): void {
         super.addEventListener(type, listener as (e: Event) => void, options);
     }
     removeEventListener<K extends keyof EventSourceEventMap>(type: K, callback: ((e: EventSourceEventMap[K]) => void) | null, options?: boolean | EventListenerOptions): void;
     removeEventListener(type: string, callback: ((e: MessageEvent) => void) | null, options?: boolean | EventListenerOptions | undefined): void;
-    removeEventListener(type: string, callback: ((e: MessageEvent) => void) | null, options?: boolean | EventListenerOptions | undefined): void {
+    removeEventListener(type: string, callback: ((e: MessageEvent) => void) | ((e: ErrorEvent) => void) | ((e: Event) => void) | null, options?: boolean | EventListenerOptions | undefined): void {
         super.removeEventListener(type, callback as (e: Event) => void, options);
     }
     

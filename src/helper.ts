@@ -16,3 +16,26 @@ export async function* textReaderToLineIterator(reader: ReadableStreamDefaultRea
     if (lastLine !== "")
         yield lastLine;
 }
+
+export class ReconnectingEventSourceError extends Error {
+    constructor() {
+        super("Reconnecting EventSource.");
+        this.name = "ReconnectingEventSourceError";
+    }
+}
+
+export class InvalidEventSourceResponseError extends Error {
+    response: Response;
+    constructor(message: string, response: Response) {
+        super(message);
+        this.name = "InvalidResponseError";
+        this.response = response;
+    }
+}
+
+export class AbortedEventSourceError extends Error {
+    constructor() {
+        super("The connection was aborted by the user.");
+        this.name = "AbortedEventSourceError";
+    }
+}
