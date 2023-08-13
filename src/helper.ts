@@ -32,10 +32,3 @@ export class InvalidEventSourceResponseError extends Error {
         this.response = response;
     }
 }
-
-export class AbortedEventSourceError extends Error {
-    constructor() {
-        super("The connection was aborted by the user.");
-        this.name = "AbortedEventSourceError";
-    }
-}

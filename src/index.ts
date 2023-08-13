@@ -1,5 +1,5 @@
-import { textReaderToLineIterator, InvalidEventSourceResponseError, ReconnectingEventSourceError, AbortedEventSourceError } from "./helper";
-export { InvalidEventSourceResponseError, ReconnectingEventSourceError, AbortedEventSourceError };
+import { textReaderToLineIterator, InvalidEventSourceResponseError } from "./helper";
+export { InvalidEventSourceResponseError };
 
 const defaultRetryTime = 1000;
 
@@ -9,13 +9,12 @@ interface EventStreamParseBuffers {
     lastEventId: string;
 }
 
-type EventSourceInit = RequestInit & { disconnectOnHidden?: boolean };
+export type EventSourceInit = RequestInit & { disconnectOnHidden?: boolean };
 
 interface EventSourceEventMap {
     open: Event;
     message: MessageEvent;
     error: ErrorEvent;
-    close: Event;
 }
 
 enum EventSourceReadyState {
@@ -122,12 +121,11 @@ export default class EventSource extends EventTarget {
             // the fetch can throw an error in the following cases:
             // - the request is aborted
             if (e instanceof DOMException && e.name === "AbortError") {
-                let error = new AbortedEventSourceError();
-                this.#fail(error);
+                this.#fail(null);
             }
             // - the request is a network error
             else if (e instanceof TypeError) {
-                this.#reconnect();
+                this.#reconnect(e);
             }
             // unknown error - rethrow
             else {
@@ -195,27 +193,25 @@ export default class EventSource extends EventTarget {
         buffers.eventType = "";
     }
 
-    #fail(err: Error): void {
+    #fail(err: Error | null): void {
         setTimeout(() => {
             if (this.readyState === EventSourceReadyState.CLOSED)
                 return;
             this.readyState = EventSourceReadyState.CONNECTING;
             this.dispatchEvent(new ErrorEvent("error", {
                 error: err,
-                message: err.message,
+                message: err?.message,
             }));
         }, 0);
     }
 
-    async #reconnect(): Promise<void> {
+    async #reconnect(error: TypeError): Promise<void> {
         // enqueue a task to dispatch the error event
         let errorTask = Promise.resolve().then(() => {
             if (this.readyState === EventSourceReadyState.CLOSED)
                 return;
             this.readyState = EventSourceReadyState.CONNECTING;
-            this.dispatchEvent(new ErrorEvent("error", {
-                error: new ReconnectingEventSourceError(),
-            }));
+            this.dispatchEvent(new ErrorEvent("error", { error }));
         });
         // wait for the reconnect time and the error event to be dispatched
         await new Promise(resolve => setTimeout(resolve, this.#reconnectTime));
@@ -233,8 +229,9 @@ export default class EventSource extends EventTarget {
         if (document.hidden) {
             this.#abortController.abort();
             this.#abortController = new AbortController();
-        } else if (!document.hidden) {
-            this.#reconnect();
+        } else if (this.readyState !== EventSourceReadyState.CLOSED) {
+            this.readyState = EventSourceReadyState.CONNECTING;
+            this.#connect();
         }
     }
 
