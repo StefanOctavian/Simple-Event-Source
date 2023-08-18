@@ -17,13 +17,6 @@ export async function* textReaderToLineIterator(reader: ReadableStreamDefaultRea
         yield lastLine;
 }
 
-export class ReconnectingEventSourceError extends Error {
-    constructor() {
-        super("Reconnecting EventSource.");
-        this.name = "ReconnectingEventSourceError";
-    }
-}
-
 export class InvalidEventSourceResponseError extends Error {
     response: Response;
     constructor(message: string, response: Response) {
