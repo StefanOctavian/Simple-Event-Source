@@ -1,4 +1,4 @@
-# Simple Event Source
+# Simple TS Event Source
 
 ## Description
 This library provides a polyfill for the EventSource API, but does not follow the exact specification, adding extra features on top of it, making up for the gaps in the native API. It is made to be used in the browser, but it can be used in Node.js as well except for the `disconnectOnHidden` option, which uses the browser visibility API. Written in TypeScript ES2018 using the Fetch Streams API, it is a lightweight library with no dependencies.

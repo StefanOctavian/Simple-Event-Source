@@ -1,18 +1,25 @@
 {
-  "name": "simpleeventsource",
+  "name": "simple-ts-event-source",
   "version": "1.0.0",
   "description": "A simple replacement for EventSource, offering a wider range of functionalities from the fetch API, using the Streams API, inspired by Microsoft's fetch-event-source but with an API mimicking the native EventSource API.",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
   "types": "dist/cjs/index.d.ts",
   "scripts": {
+    "build": "npx tsc && npx tsc --build tsconfig.esm.json",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
     "fetch",
     "eventsource",
     "streams",
-    "api"
+    "api",
+    "polyfill",
+    "typescript",
+    "auth",
+    "authentication",
+    "sse",
+    "server-sent-events"
   ],
   "author": "Ștefan Octavian Sterea",
   "license": "MIT",
