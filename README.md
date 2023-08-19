@@ -6,7 +6,7 @@ This library provides a polyfill for the EventSource API, but does not follow th
 ## Installation
 Using npm:
 ```shell
-$ npm i --save simple-event-source
+$ npm i --save simple-ts-event-source
 ```
 
 ## Usage
