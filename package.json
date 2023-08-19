@@ -1,6 +1,6 @@
 {
   "name": "simple-ts-event-source",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A simple replacement for EventSource, offering a wider range of functionalities from the fetch API, using the Streams API, inspired by Microsoft's fetch-event-source but with an API mimicking the native EventSource API.",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
