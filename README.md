@@ -31,7 +31,8 @@ eventSource.addEventListener('custom-event', (event: MessageEvent) => console.lo
 // close the connection when you're done
 eventSource.close();
 ```
-When the connection to the server is lost, first an `ErrorEvent` is fired to 
+When the connection to the server is lost, first an `ErrorEvent` is fired to the `onerror` handler, containing in its `error` property a Network Error that was thrown by the Fetch API, then a reconnection is attempted after 1 second by default. The reconnection timeout can be changed by the server by sending a `retry` field in the event stream, which is the number of milliseconds to wait before attempting to reconnect.
+
 ## API Reference
 ### `type EventSourceInit`
 ```ts 
